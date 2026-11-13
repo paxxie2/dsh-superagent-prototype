@@ -1,0 +1,18 @@
+{
+  "schemaVersion": 1,
+  "deployment": "controlled-candidate-sa-copy-plus-instance",
+  "instance": "/Users/zm/dsh-instances/b-verify-parallel",
+  "port": 3245,
+  "defaults": {
+    "requireSessionBinding": true,
+    "hostPolicy": "dsh-home/profiles/b-verify/cordis.patch.yml:hephi.config.requireSessionBinding",
+    "contractPolicy": "candidate-defaults.env:HEPHI_REQUIRE_SESSION_BINDING=1",
+    "loaders": ["start.sh", "prepare.sh"]
+  },
+  "defaultEnvTemplate": "export HEPHI_REQUIRE_SESSION_BINDING=1\n",
+  "policy": "Fixed deployment configuration before startup; no per-ticket or command-line overrides. Preserve true for every instance deployed from this candidate shape.",
+  "productionApproved": false,
+  "excludedDeployment": "g1-exp",
+  "excludedPorts": [3085, 3086],
+  "hephiSourceChanges": false
+}
