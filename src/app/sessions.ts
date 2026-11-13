@@ -8,6 +8,7 @@ import { dirname } from 'node:path'
 import { z } from 'zod'
 import { key, liveTicket, type Ticket } from '../core/index.ts'
 import { mandateInstructions, ticketOfSession } from '../executor/dsh.ts'
+import { installBindingWriter } from '../executor/binding-record.ts'
 import type { HealthEntry } from '../infra/health.ts'
 import { AgentDelivery, messageId } from './delivery.ts'
 import type { Effects } from './effects.ts'
@@ -266,7 +267,8 @@ export class Sessions {
         agent.ctx.tools.guard(execution => noWait(execution, () => this.routed(agent))))
     } else {
       // An Executor Session keeps the profile's work tools it has, which DSH requires to be known; its own tools are not masked.
-      binding.disposers.push(...this.workOnly(agent, ticket!.id))
+      binding.disposers.push(...this.workOnly(agent, ticket!.id),
+        installBindingWriter(this.ctx, agent, () => host.store.tickets.get(ticket!.id)))
     }
   }
   /**

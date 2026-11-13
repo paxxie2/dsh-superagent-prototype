@@ -41,6 +41,15 @@ const PREPARE_MARKER_DIR = 'prepare-markers'
  * always prepares, even if its directory exists.
  */
 const LEGACY_WORKSPACE_ACCEPTANCE = 'ticket-history-only' as const
+/**
+ * W5: the HEPHI activation directory for a ticket lives under the host state directory as
+ * `<stateDir>/hephi/<ticketId>/`. The prepare command writes `activation.json` there on success;
+ * a prepare that fails after creating the workspace leaves only `activation.intent`. The legacy
+ * acceptance branch must not backwrite a marker over such an incomplete preparation: the worker
+ * would start with a mounted intent but no contract and every mode-sensitive tool call would be
+ * denied with ENOENT (see hephi eval evidence host-b-e2e-20261113/attempt-01-activation-blocked).
+ */
+const HEPHI_STATE_DIR = 'hephi'
 
 /** T12: the durable record that a ticket's workspace passed prepare and verifyDirectory. */
 export interface PrepareMarker {
@@ -328,6 +337,19 @@ export class DshExecutor implements Executor {
   private hasAssignmentHistory(ticket: Ticket): boolean {
     return ticket.assignments.length > 1 || ticket.assignments.some(assignment => assignment.endedAt !== undefined)
   }
+
+  /**
+   * W5: whether this ticket's HEPHI preparation is incomplete — `activation.intent` was written
+   * but the `activation.json` contract the prepare command produces on success is absent. Only
+   * such an interrupted HEPHI preparation disqualifies the legacy workspace fallback; tickets
+   * without any HEPHI intent directory keep the old migration behavior unchanged.
+   */
+  private async activationContractMissing(ticketId: string): Promise<boolean> {
+    const directory = join(this.host.machine.stateDir, HEPHI_STATE_DIR, ticketId)
+    const intent = await stat(join(directory, 'activation.intent')).then(() => true, () => false)
+    if (!intent) return false
+    return await stat(join(directory, 'activation.json')).then(() => false, () => true)
+  }
   /** Enqueues a `launch` effect for an accepted or resumed assignment; launches start in queue order as worker slots free up. */
   start(ticket: Ticket, assignment: Assignment): void {
     this.host.effects.enqueue('launch', assignment.id, { ticketId: ticket.id, assignmentId: assignment.id })
@@ -505,11 +527,16 @@ export class DshExecutor implements Executor {
     const marker = await this.readPrepareMarker(ticket.id)
     const prepared = exists && marker?.directory === workspace
     if (!prepared) {
-      if (exists && LEGACY_WORKSPACE_ACCEPTANCE === 'ticket-history-only' && this.hasAssignmentHistory(ticket)) {
+      if (exists && LEGACY_WORKSPACE_ACCEPTANCE === 'ticket-history-only' && this.hasAssignmentHistory(ticket)
+        && !(await this.activationContractMissing(ticket.id))) {
         // Migration fallback for workspaces created before prepare markers existed: accept the
         // existing directory under the old behavior and record it, once, so the next launch has a marker.
         await this.writePrepareMarker(ticket)
       } else {
+        // W5: also reached when the legacy workspace's HEPHI preparation never completed
+        // (activation.intent present but activation.json absent): re-run prepare — a failed
+        // prepare surfaces as PrepareFailed rather than a silently accepted half-prepared
+        // workspace. A prepare failure marks the launch failed; it is not a silent skip.
         await this.prepareDirectory(ticket)
         if (!current()) return
       }

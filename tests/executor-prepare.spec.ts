@@ -226,3 +226,63 @@ describe('T12 prepare success marker (AT-10..AT-14)', () => {
     expect(h.marker()!.verifiedAt).not.toBe('2020-01-01T00:00:00.000Z')
   })
 })
+
+describe('W5 legacy acceptance must not skip a half-finished HEPHI preparation', () => {
+  /** Writes the ticket's HEPHI state directory with `activation.intent`, and optionally `activation.json`. */
+  function hephiState(h: Harness, withContract: boolean): string {
+    const directory = join(h.stateDir, 'hephi', h.ticket.id)
+    mkdirSync(directory, { recursive: true })
+    writeFileSync(join(directory, 'activation.intent'), `${h.ticket.id}\n`)
+    if (withContract) writeFileSync(join(directory, 'activation.json'), `{"ticketId":"${h.ticket.id}"}\n`)
+    return directory
+  }
+
+  it('W5-1: legacy workspace + assignment history + intent without activation.json re-runs prepare (no silent marker)', async () => {
+    const h = harness({ prepare: 'true', ticket: {
+      assignments: [assignment({ state: 'ended', endedAt: '2026-01-01T00:00:00.000Z' }), assignment({ id: 'a2' })],
+    } })
+    mkdirSync(h.workspace, { recursive: true })
+    hephiState(h, false)
+    await h.launch()
+    // Prepare ran instead of backwriting a marker over the half-prepared workspace.
+    expect(shCalls(h)).toHaveLength(1)
+    expect(h.marker()).toEqual({ ticketId: 't1', directory: h.workspace, verifiedAt: expect.any(String) })
+    expect(h.sessions.ensure).toHaveBeenCalledTimes(1)
+  })
+
+  it('W5-2: a failed re-prepare surfaces as a failed launch, not a silently accepted workspace', async () => {
+    const h = harness({ prepare: 'true', prepareResult: { exitCode: 1, stderr: 'prepare: activation contract not written' }, ticket: {
+      assignments: [assignment({ state: 'ended', endedAt: '2026-01-01T00:00:00.000Z' }), assignment({ id: 'a2' })],
+    } })
+    mkdirSync(h.workspace, { recursive: true })
+    hephiState(h, false)
+    await h.launch()
+    expect(shCalls(h)).toHaveLength(1)
+    expect(h.engine.report).toHaveBeenCalledWith('t1', expect.objectContaining({ state: 'failed' }))
+    expect(h.marker()).toBeUndefined()
+    expect(h.sessions.ensure).not.toHaveBeenCalled()
+  })
+
+  it('W5-3: legacy workspace whose activation.json exists keeps the old backwrite behavior (no prepare)', async () => {
+    const h = harness({ prepare: 'true', ticket: {
+      assignments: [assignment({ state: 'ended', endedAt: '2026-01-01T00:00:00.000Z' }), assignment({ id: 'a2' })],
+    } })
+    mkdirSync(h.workspace, { recursive: true })
+    hephiState(h, true)
+    await h.launch()
+    expect(shCalls(h)).toHaveLength(0)
+    expect(h.marker()).toEqual({ ticketId: 't1', directory: h.workspace, verifiedAt: expect.any(String) })
+    expect(h.sessions.ensure).toHaveBeenCalledTimes(1)
+  })
+
+  it('W5-4: a ticket with no HEPHI intent at all is unaffected (legacy backwrite still applies)', async () => {
+    const h = harness({ prepare: 'true', ticket: {
+      assignments: [assignment({ state: 'ended', endedAt: '2026-01-01T00:00:00.000Z' }), assignment({ id: 'a2' })],
+    } })
+    mkdirSync(h.workspace, { recursive: true })
+    await h.launch()
+    expect(shCalls(h)).toHaveLength(0)
+    expect(h.marker()).toEqual({ ticketId: 't1', directory: h.workspace, verifiedAt: expect.any(String) })
+    expect(h.sessions.ensure).toHaveBeenCalledTimes(1)
+  })
+})
