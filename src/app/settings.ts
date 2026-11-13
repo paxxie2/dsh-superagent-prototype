@@ -12,6 +12,7 @@ import { changedPaths, settingsNotice } from './notices.ts'
 import type { Sessions } from './sessions.ts'
 import { setupChanged, type Setup } from './setup.ts'
 import type { Store } from './store.ts'
+import type { DshExecutor } from '../executor/dsh.ts'
 import { KV } from '../kv.ts'
 
 /**
@@ -54,6 +55,8 @@ const BLOCKS: Record<'policy' | 'eval' | 'executor' | 'source', Block> = {
 
 /** Host dependencies used by `Settings`. */
 export interface SettingsHost {
+  /** Includes running worker turns and settling background work, not persistent assignment bindings. */
+  readonly executor: Pick<DshExecutor, 'activeCount'>
   readonly store: Pick<Store, 'settings' | 'saveSettings' | 'blockRevision' | 'atomic' | 'tickets' | 'get'>
   readonly sources: SourceRegistry
   /** Notified when a settings save changes the policy version. */
@@ -146,7 +149,30 @@ export class Settings {
    * @throws UserError | z.ZodError when `block` is unknown, the source is not installed, `value` is invalid (such as an `executor` block carrying `paused`, which only `pause` sets), a non-panel `origin` changes panel-only fields, or a role-model or account check fails.
    */
   async save(block: SettingsBlock, value: unknown, revision: number, origin: SettingsOrigin) {
+    return this.saveBlock(block, value, revision, origin, false)
+  }
+  /** Trusted in-process control-plane update. Never exposed through HTTP or agent tools.
+   * Keeps origin guards, revision checks and notifications; records hostInternal in audit.
+   * Even this path cannot change deployment/accounts while assignments are live.
+   */
+  async saveHostInternal(block: SettingsBlock, value: unknown, revision: number, origin: SettingsOrigin) {
+    return this.saveBlock(block, value, revision, origin, true)
+  }
+  private async saveBlock(block: SettingsBlock, value: unknown, revision: number, origin: SettingsOrigin, hostInternal: boolean) {
     const { store, sources, engine, sessions } = this.host
+    // HTTP panel headers are forgeable by same-UID worker shells. Freeze shared
+    // settings while worker turns or background work run, including queued launches.
+    // An idle worker's assignment may remain running indefinitely; reports alone also
+    // do not prove idleness. Only the explicit in-process path bypasses this guard.
+    const assertIdle = (current?: SettingsValue, candidate?: SettingsValue) => {
+      const safeInternal = hostInternal && (!current || !candidate ||
+        (!setupChanged(current, candidate) && environment(current) === environment(candidate)))
+      if (!safeInternal && (this.host.executor.activeCount() > 0 ||
+        store.tickets.open().some(ticket => ticket.assignments.some(assignment => assignment.state === 'pending')))) {
+        throw new SettingsConflict('Shared settings are locked while workers are executing or awaiting launch. Configure only when all workers are idle.')
+      }
+    }
+    assertIdle()
     const stale = () => revision !== store.blockRevision(block)
     if (stale()) throw new SettingsConflict('Settings changed. Reload before saving.')
     const id = block.startsWith('source:') ? block.slice(7) : block
@@ -157,6 +183,7 @@ export class Settings {
     const parsed = rules.parse(value, sources, id)
     const current = store.settings()
     const candidate = rules.merge(current, parsed, id)
+    assertIdle(current, candidate)
     const model = block === 'eval' ? candidate.eval.model : block === 'executor' ? candidate.executor.model : null
     const previous = block === 'eval' ? current.eval.model : block === 'executor' ? current.executor.model : null
     if (model && JSON.stringify(model) !== JSON.stringify(previous)) {
@@ -180,7 +207,11 @@ export class Settings {
     const effects = before === after ? new Map() : policyEffects(store.tickets.open(), old, SettingsSchema.parse(settings), scope)
     const notified = [...effects.keys()]
     store.atomic(() => {
-      store.saveSettings(SettingsSchema.parse(settings), { source: origin, block, policyVersion: after, policyChanged: before !== after, notified })
+      // Recheck after asynchronous account/model validation, immediately before
+      // the synchronous commit, so a newly admitted assignment cannot be raced.
+      assertIdle(old, settings)
+      store.saveSettings(SettingsSchema.parse(settings), { source: origin, block, policyVersion: after, policyChanged: before !== after, notified,
+        ...(hostInternal ? { hostInternal: true as const } : {}) })
       if (origin !== 'tool') sessions.notify(...settingsNotice(block, changedPaths(old, settings)))
       if (before !== after) engine.policyChanged(before, after, effects)
     })
