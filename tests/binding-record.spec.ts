@@ -99,3 +99,13 @@ describe('B2 binding writer (isolated fixtures, not E2E)', () => {
     expect(next).toHaveBeenCalledOnce()
   })
 })
+
+it('DSH_BINDING_RECORD directory resolves to <dir>/<ticket>.json (consumer parity)', async () => {
+  const { input } = await fixture()
+  const dir = await mkdtemp(join(tmpdir(), 'sa-binding-test-dir-')); paths.push(dir)
+  const written: string[] = []
+  const path = await writeBindingRecord({ ...input, env: { DSH_BINDING_RECORD: dir },
+    persist: async (file: string, body: string) => { written.push(file); await writeFile(file, body) } })
+  expect(path).toBe(join(dir, `${(input.ticket as { id: string }).id}.json`))
+  expect(written[0]).toBe(path)
+})

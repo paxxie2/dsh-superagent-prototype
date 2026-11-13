@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
-import { mkdir, readFile, readdir, rename, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, readdir, rename, stat, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { promisify } from 'node:util'
@@ -88,7 +88,16 @@ export async function writeBindingRecord(input: BindingInput): Promise<string | 
   const record = { version: 1, producedAt: new Date().toISOString(), producer: 'dsh-superagent',
     ticket: { id: input.ticket.id, repository: contract.repository, issue: contract.issueNumber }, session: { id: input.sessionId },
     execution, finalCommit: { sha: pull.headRefOid, baseSha: contract.baseSha, prNumber } }
-  const path = env.DSH_BINDING_RECORD?.trim() ? resolve(env.DSH_BINDING_RECORD.trim()) : join(stateDir, 'binding', `${input.ticket.id}.json`)
+  // Mirror the hephi consumer's source rule exactly: an explicitly configured location that
+  // is an existing directory resolves to `<dir>/<ticket>.json`; otherwise it is a file path.
+  const configured = env.DSH_BINDING_RECORD?.trim()
+  let path: string
+  if (configured) {
+    const resolved = resolve(configured)
+    let isDirectory = false
+    try { isDirectory = (await stat(resolved)).isDirectory() } catch { isDirectory = false }
+    path = isDirectory ? join(resolved, `${input.ticket.id}.json`) : resolved
+  } else path = join(stateDir, 'binding', `${input.ticket.id}.json`)
   await (input.persist ?? (async (file, body) => {
     await mkdir(dirname(file), { recursive: true })
     const temporary = `${file}.${randomUUID()}.tmp`
