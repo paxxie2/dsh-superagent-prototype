@@ -412,7 +412,7 @@ it('tells live workers about policy changes instead of revoking them and restart
   expect(runtime.store.threads.get(`feishu:${CHAT}:om_8`)?.evaluating).toBeDefined()
   deliveries.mockClear()
   const settings = runtime.store.settings()
-  const result = await runtime.settings.save('policy', { ...settings.policy, rules: settings.policy.rules.map(rule => ({ ...rule, enabled: rule.id === 'copy' })) }, runtime.store.blockRevision('policy'), 'panel')
+  const result = await runtime.settings.saveHostInternal('policy', { ...settings.policy, rules: settings.policy.rules.map(rule => ({ ...rule, enabled: rule.id === 'copy' })) }, runtime.store.blockRevision('policy'), 'panel')
   await runtime.idle()
   expect(result).toMatchObject({ saved: true, policy_changed: true })
   // The rules changed, but not as they bear on this explicit ticket, whose requester is still allowed: its worker is not woken.
@@ -420,7 +420,7 @@ it('tells live workers about policy changes instead of revoking them and restart
   expect(relays(sessionId)).toEqual([])
   // Its requester comes off the allowed list: the worker is told so, inline, and the ticket goes on.
   const current = runtime.store.settings().policy
-  await runtime.settings.save('policy', { ...current, sources: { ...current.sources, feishu: { ...current.sources.feishu!, allowed: [] } } },
+  await runtime.settings.saveHostInternal('policy', { ...current, sources: { ...current.sources, feishu: { ...current.sources.feishu!, allowed: [] } } },
     runtime.store.blockRevision('policy'), 'panel')
   await runtime.idle()
   expect(runtime.store.tickets.get(ticket.id)!.inputs).toEqual([expect.objectContaining({ kind: 'policy-changed',
@@ -600,13 +600,13 @@ it('reports a Source that was switched on as starting until its next pass report
 it('records each settings save with its policy change and the open tickets told about it', async () => {
   const { ticket } = await acceptedTicket()
   const settings = runtime.store.settings()
-  await runtime.settings.save('executor', { ...settings.executor, maxWorkers: 5 }, runtime.store.blockRevision('executor'), 'panel')
+  await runtime.settings.saveHostInternal('executor', { ...settings.executor, maxWorkers: 5 }, runtime.store.blockRevision('executor'), 'panel')
   // What a Source receives is its own configuration, not the Policy; who may originate work there is the Policy's.
   const feishu = runtime.sources.instance('feishu')!
-  await runtime.settings.save('source:feishu', { enabled: true, config: { ...feishu.config, directMessages: false } }, runtime.store.blockRevision('source:feishu'), 'panel')
+  await runtime.settings.saveHostInternal('source:feishu', { enabled: true, config: { ...feishu.config, directMessages: false } }, runtime.store.blockRevision('source:feishu'), 'panel')
   const policy = runtime.store.settings().policy
-  await runtime.settings.save('policy', { ...policy, sources: { ...policy.sources, feishu: { ...policy.sources.feishu!, allowed: [...policy.sources.feishu!.allowed, { id: 'ou_bob', name: 'Bob' }] } } }, runtime.store.blockRevision('policy'), 'panel')
-  await expect(runtime.settings.save('executor', settings.executor, 0, 'panel')).rejects.toThrow('Settings changed')
+  await runtime.settings.saveHostInternal('policy', { ...policy, sources: { ...policy.sources, feishu: { ...policy.sources.feishu!, allowed: [...policy.sources.feishu!.allowed, { id: 'ou_bob', name: 'Bob' }] } } }, runtime.store.blockRevision('policy'), 'panel')
+  await expect(runtime.settings.saveHostInternal('executor', settings.executor, 0, 'panel')).rejects.toThrow('Settings changed')
   const history = policyHistory(runtime.store, runtime.sources, policyVersion(runtime.store.settings()))
   expect(history.items.slice(0, 3)).toEqual([
     // Another sender on the list bears on no open ticket, so none is told.
@@ -832,9 +832,9 @@ it('waits for setup without the agent\'s GitHub CLI: the panel works, and nothin
   // A save that changes nothing records nothing; any other save runs setup again, since it may be the fix, and so does a
   // check after a fix outside dsh-superagent.
   const revision = next.store.get<number>('settings-revision')
-  expect(await next.settings.save('policy', next.store.settings().policy, next.store.blockRevision('policy'), 'panel')).toMatchObject({ saved: true, restarting: false })
+  expect(await next.settings.saveHostInternal('policy', next.store.settings().policy, next.store.blockRevision('policy'), 'panel')).toMatchObject({ saved: true, restarting: false })
   expect(next.store.get<number>('settings-revision')).toBe(revision)
-  expect(await next.settings.save('policy', { ...next.store.settings().policy, rules: [] }, next.store.blockRevision('policy'), 'panel')).toMatchObject({ saved: true, restarting: true })
+  expect(await next.settings.saveHostInternal('policy', { ...next.store.settings().policy, rules: [] }, next.store.blockRevision('policy'), 'panel')).toMatchObject({ saved: true, restarting: true })
   await vi.waitFor(() => expect(restarts).toHaveBeenCalledTimes(1))
   next.checkSetup()
   await vi.waitFor(() => expect(restarts).toHaveBeenCalledTimes(2))

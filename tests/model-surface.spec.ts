@@ -208,7 +208,7 @@ async function drive(host: Host) {
   // The rule ticket b was accepted under changes, so its worker is told how; the one it was not is disabled, which tells no one.
   const rules = policy.rules.map(rule => rule.id === 'visual' ? { ...rule, enabled: false }
     : rule.id === 'copy' ? { ...rule, instruction: `${rule.instruction} Keep the wording short.` } : rule)
-  await runtime.settings.save('policy', { ...policy, rules }, runtime.store.blockRevision('policy'), 'panel')
+  await runtime.settings.saveHostInternal('policy', { ...policy, rules }, runtime.store.blockRevision('policy'), 'panel')
   // Worker b's turn ends: it is idle, as DSH says when it emits the event.
   host.agents.get(workerB)!.status = 'idle'
   host.ctx.emit('agent/status', { agent: host.agents.get(workerB), status: 'idle' } as never)

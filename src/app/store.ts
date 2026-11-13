@@ -22,6 +22,8 @@ export type Dropped = Receipt & { dropped: { at: string; reason: DropReason } }
 export interface SettingsVersion {
   revision: number; savedAt: string; source: SettingsOrigin | 'internal'; block?: SettingsSave
   policyVersion: string; policyChanged: boolean; notified: string[]; settings: Settings
+  /** Explicit trusted in-process save, never set by the HTTP/tool settings routes. */
+  hostInternal?: true
 }
 /**
  * Generated columns and partial indexes defining active working sets so passes scan only active rows.
