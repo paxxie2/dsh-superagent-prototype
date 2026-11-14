@@ -35,7 +35,9 @@ function setup(options: {
   const get = vi.fn((id: string) => id === agent.id ? agent : children.get(id))
   const subagents = {
     waitForTreeWork: vi.fn(options.waitForTreeWork ?? (async () => false)),
-    listDescendants: vi.fn(options.listDescendants ?? (async () => [])),
+    // The catalog lists every child a test registers as an Agent, as rc.3 does, unless the test shapes the rows itself.
+    listDescendants: vi.fn(options.listDescendants
+      ?? (async () => [...children.keys()].map(id => ({ kind: 'child' as const, id, parentId: agent.id, depth: 1 })))),
     interrupt: vi.fn(options.interrupt ?? ((id: string) => { const child = children.get(id); if (child) child.status = 'idle' })),
     waitForChildren: vi.fn(async () => false),
     listChildren: vi.fn(async () => []),
