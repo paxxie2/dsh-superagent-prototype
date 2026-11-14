@@ -86,6 +86,26 @@ The fourth command creates `~/.dsh/profiles/superagent` from the DeepSeek Harnes
 
 Run the profile-creation command only for a new installation. If the profile already exists, that command replaces it and deletes its `cordis.patch.yml`, including machine configuration. Do not use it for upgrades.
 
+### Deploying a built bundle
+
+`dsh plugin --profile <name> add` installs the bundle as a profile dependency: pnpm installs its real dependencies and leaves the `@deepseek-ai/*` peers unresolved, and DSH resolves those peer imports to the running installation's own copies. A **linked checkout** behaves the same way even when it carries its own development `node_modules`, because DSH resolves every import of a linked bundle through the installation.
+
+Keep that property when you deploy a bundle built elsewhere — a CI artifact, or a second copy kept for rollback:
+
+- install it with `dsh plugin --profile <name> add <tarball-or-link>`, or
+- link the profile at a directory **outside `$DSH_HOME/profiles`**, for example `"link:$HOME/dsh-superagent"` for a checkout, or a built copy under `$HOME/dsh-superagent/releases/<name>`.
+
+Do **not** copy a development install, with its `node_modules`, into `$DSH_HOME/profiles`, and do not point `node_modules/dsh-superagent` at such a directory. DSH resolves modules under the profiles tree as profile-owned: the bundle's own `node_modules/@deepseek-ai/*` copies win over the installation's, and module-private state in those copies — for example `@deepseek-ai/dsh-scope`'s scope-parent WeakMap — disagrees with the Host. The symptom is a Worker Session that opens with only the globally registered tools: `workOnly` finds no preset scope in that copy, so `bash`, `read`, `subagent` and the other work tools are filtered out, while the main Session keeps its own tools.
+
+Check a deployment before restarting the profile, and check a candidate directory before switching the link to it:
+
+```sh
+node scripts/check-deployment.mjs --profile <name>
+node scripts/check-deployment.mjs --profile <name> --bundle <candidate>
+```
+
+It exits 1 when a bundle inside the profiles tree carries runtime copies, and when a linked bundle does not declare an imported runtime package as a peer. `node scripts/check-deployment.mjs --self-test` exercises the classifier with synthetic trees.
+
 ## Machine configuration
 
 Copy [examples/profile.cordis.patch.yml](../examples/profile.cordis.patch.yml) to `~/.dsh/profiles/superagent/cordis.patch.yml`, replacing that file, and replace every `<placeholder>`. For Feishu, also enable the `dsh-superagent-feishu` entry there. The `webserver` entry sets the panel's port.
