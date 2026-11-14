@@ -231,12 +231,13 @@ it('treats a complete listing with no rows as the only normal empty result', asy
   expect(agent.cancel).not.toHaveBeenCalled()
 })
 
-it('fails a stop when the subagents service is missing, still cancelling the turn', async () => {
+it('fails a stop when the subagents service is missing, without cancelling a turn no child woke', async () => {
   const { ctx, agent } = setup({ subagents: false })
   const failure = await thrown(stopSubagents(ctx, agent))
   expect(failure).toBeInstanceOf(AggregateError)
   expect(failuresOf(failure)).toContain('subagents service')
-  expect(agent.cancel).toHaveBeenCalledWith({ kind: 'user' }, { keepInbox: false })
+  // A service that is absent has no child whose end woke the worker, so its turn is left as it was.
+  expect(agent.cancel).not.toHaveBeenCalled()
   // A stop of the Session's background work reports it too, alongside its shell jobs.
   await expect(stopBackground(ctx, 'worker-t1', 'the Assignment ended')).rejects.toBeInstanceOf(AggregateError)
 })
